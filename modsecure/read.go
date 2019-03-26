@@ -2,8 +2,8 @@ package modsecure
 
 import (
 	"bufio"
+	//"compress/gzip"
 	"fmt"
-	"github.com/araddon/dateparse"
 	"github.com/pkg/errors"
 	"io"
 	"net"
@@ -11,60 +11,130 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-)
-
-var (
-	errEndReached = errors.New("End reached")
+	"sync"
+	"time"
 )
 
 type readBuffer struct {
-	// TODO lock this struct with mutex
+	readRecordMutex             *sync.Mutex
+	readSectionMutex            *sync.Mutex
 	lastReadLine    string
 	hasLastReadLine bool
 	reader          *bufio.Reader
 	IsFinished      bool
+	linePointer     int
+	LastSegmentKey  EStructure
+	DebugSkipper    bool
 }
 
-func createBuffer(filename string) (buffer *readBuffer, err error) {
+type RecordReader struct {
+	buffer *readBuffer
+	Err error
+}
+
+var (
+	errEndReached = errors.New("End reached")
+	errNotMyRecord = errors.New("Not my Segment")
+	// parses: "--26bc3c6f-A--"
+	sectionStartRegex = regexp.MustCompile(`^--([a-z0-9]{8})-([ABCDEFGHIJKZ])--$`)
+	// parses: "[08/Oct/2018:00:00:01 +0200] W7qB4cCoFIQAAHtbutUAAAFI 92.38.32.36 36354 192.168.20.132 443"
+	logHeaderRegex = regexp.MustCompile(`^\[([0-9]{2}/(?:Jan|Feb|Mar|Apr|Mai|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/[0-9]{4}(?::[0-9]{2}){3}\s\+[0-9]{4})\]\s([a-zA-Z0-9\-@]{24})\s([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s([0-9]+)\s([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s([0-9]+)$`)
+	// parses: "POST /callback/auth/context/notify/v1.0 HTTP/2.0"
+	headerReqHeadRegex = regexp.MustCompile(`^([A-Z]+)\s([^\s]+)\s([A-Z]+/[0-9.]+)$`)
+	headerResHeadRegex = regexp.MustCompile(`^([A-Z]+/[0-9.]+)\s([0-9]{3,})\s*$`)
+	layoutDate = "02/Jan/2006:15:04:05 -0700"
+)
+
+// TODO: Files need to be closed on panic or on other stuff.
+
+func CreateRecordReader(filename string, debugSkipper bool) (reader *RecordReader, err error) {
+	buffer, err := createBuffer(filename, debugSkipper)
+	if err != nil {
+		return nil, err
+	}
+	return &RecordReader{
+		buffer:buffer,
+	}, nil
+}
+
+func (r *RecordReader) Next() (record *Record, err error) {
+	return ReadSingleRecord(r.buffer)
+}
+
+func (r *RecordReader) HasNext() (bool) {
+	return !r.buffer.IsFinished
+}
+
+func (r *RecordReader) Iter() <- chan *Record {
+	ch := make(chan *Record)
+	go func() {
+		defer close(ch)
+		for r.HasNext() {
+			item, err := r.Next()
+			if err != nil {
+				r.Err = err
+				return
+			}
+			ch <- item
+		}
+	}()
+	return ch
+}
+
+func createBuffer(filename string, debugSkipper bool) (buffer *readBuffer, err error) {
 	file, err := os.OpenFile(filename, os.O_RDONLY, os.ModePerm)
 	if err != nil {
 		//fmt.Println("ERROR: Could not open file")
 		return nil, err
 	}
+	//test, _ := gzip.NewReader(file)
 	reader := bufio.NewReader(file)
 	buffer = &readBuffer{
 		lastReadLine:    "",
 		hasLastReadLine: false,
 		reader:          reader,
 		IsFinished:      false,
+		readRecordMutex: &sync.Mutex{},
+		readSectionMutex: &sync.Mutex{},
+		LastSegmentKey: NIL,
+		DebugSkipper: debugSkipper,
 	}
 	return buffer, nil
 }
 
-func (r readBuffer) ReadLine() (line string, err error) {
-	// TODO: lock
+func (r *readBuffer) ReadLine() (line string, err error) {
+	if r.IsFinished {
+		return "", io.EOF
+	}
 	if r.hasLastReadLine {
 		r.hasLastReadLine = false
+		r.linePointer = r.linePointer + 1
 		return r.lastReadLine, nil
 	} else {
-		return r.getLineOrLast()
+		line, err = r.getLineOrLast()
+		r.linePointer = r.linePointer + 1
+		return line, err
 	}
 }
 
-func (r readBuffer) getLineOrLast() (line string, err error) {
-	// TODO: lock
-	readString, err := r.reader.ReadString('\n')
-	if err != nil {
-		return readString, err
-	} else {
-		readString = strings.Trim(readString, "\n")
-		return readString, nil
+func (r *readBuffer) getLineOrLast() (line string, err error) {
+	for {
+		readString, err := r.reader.ReadString('\n')
+		if err != nil {
+			return readString, err
+		} else {
+			readString = strings.Trim(readString, "\n")
+			if r.DebugSkipper && strings.HasPrefix(readString, "#") {
+				r.linePointer = r.linePointer + 1
+				continue
+			}
+			return readString, nil
+		}
 	}
 }
 
-func (r readBuffer) PeekLine() (line string, err error) {
+func (r *readBuffer) PeekLine() (line string, err error) {
 	if !r.hasLastReadLine {
-		// TODO: lock
 		line, err = r.getLineOrLast()
 		r.lastReadLine = line
 		r.hasLastReadLine = true
@@ -72,22 +142,17 @@ func (r readBuffer) PeekLine() (line string, err error) {
 	return r.lastReadLine, err
 }
 
-func (r readBuffer) AcceptPeekedLine() {
-	r.hasLastReadLine = false
+func (r *readBuffer) AcceptPeekedLine() {
+	if r.hasLastReadLine {
+		r.linePointer = r.linePointer + 1
+		r.hasLastReadLine = false
+	}
 }
 
-var (
-	// parses: "--26bc3c6f-A--"
-	sectionStartRegex = regexp.MustCompile(`^--([a-z0-9]{8})-([ABCDEFGHIJKZ])--$`)
-	// parses: "[08/Oct/2018:00:00:01 +0200] W7qB4cCoFIQAAHtbutUAAAFI 92.38.32.36 36354 192.168.20.132 443"
-	logHeaderRegex = regexp.MustCompile(`^\[([0-9]{2}/(?:Jan|Feb|Mar|Apr|Mai|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/[0-9]{4}(?::[0-9]{2}){3}\s\+[0-9]{4})\]\s([a-zA-Z0-9]{24})\s([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s([0-9]+)\s([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s([0-9]+)$`)
-	// parses: "POST /callback/auth/context/notify/v1.0 HTTP/2.0"
-	headerReqHeadRegex = regexp.MustCompile(`^([A-Z]+)\s([^\s]+)\s([A-Z]+/[0-9.]+)$`)
-	headerResHeadRegex = regexp.MustCompile(`^([A-Z]+/[0-9.]+)\s([0-9]{3,})$`)
-)
-
-func ReadRecord(reader *readBuffer) (record *Record, err error){
+func ReadSingleRecord(reader *readBuffer) (record *Record, err error){
 	record = &Record{}
+	reader.readRecordMutex.Lock()
+	defer reader.readRecordMutex.Unlock()
 	for {
 		err = record.ReadSection(reader)
 		if err != nil {
@@ -97,15 +162,20 @@ func ReadRecord(reader *readBuffer) (record *Record, err error){
 				}
 				return nil, errors.WithMessage(err, "Failed to create new record")
 			}
-			if err == errEndReached {
+			if err == errEndReached || err == errNotMyRecord {
+				if reader.LastSegmentKey != AuditLogFooter {
+					return nil, errors.New(fmt.Sprintf("Record is not complete. Stopped parsing at line %d", reader.linePointer))
+				}
 				return record, nil
 			}
-			return nil, err
+			return nil, errors.WithMessage(err, fmt.Sprintf("Error in line: %d", reader.linePointer))
 		}
 	}
 }
 
-func (r Record) ReadSection(reader *readBuffer) (err error) {
+func (r *Record) ReadSection(reader *readBuffer) (err error) {
+	reader.readSectionMutex.Lock()
+	reader.readSectionMutex.Unlock()
 	firstLine, err := reader.PeekLine()
 	if err != nil {
 		if err == io.EOF {
@@ -122,11 +192,17 @@ func (r Record) ReadSection(reader *readBuffer) (err error) {
 		return errors.New("Invalid section start")
 	}
 	if r.Id == "" {
+		if sectionType != AuditHeader {
+			return errors.New("Invalid section start")
+		}
 		r.Id = sectionName
 	} else if r.Id != sectionName {
-		return errors.New("Not my Id")
+		return errNotMyRecord
+	} else if sectionType <= reader.LastSegmentKey {
+		return errNotMyRecord
 	}
 	reader.AcceptPeekedLine()
+	reader.LastSegmentKey = sectionType
 	body, err := readSectionBody(reader)
 	switch sectionType {
 	case AuditHeader:
@@ -300,7 +376,7 @@ func parseResponseHeader(body []string) (section *SectionFResponseHeaders, err e
 	// All following lines are one line headers.
 	parsedLine := headerResHeadRegex.FindStringSubmatch(body[0])
 	if parsedLine == nil {
-		return nil, errors.New("Invalid Body")
+		return nil, errors.New(fmt.Sprintf("Invalid Response Header: \"%s\"", body[0]))
 	}
 	subbody := body[1:]
 	for _, elem := range subbody {
@@ -365,7 +441,7 @@ func parseAuditHeader(body []string) (section *SectionAAuditHeader, err error) {
 	if parsedHeader == nil {
 		return nil, errors.New("Invalid Header")
 	}
-	date, err := dateparse.ParseStrict(parsedHeader[1])
+	date, err := time.Parse(layoutDate, parsedHeader[1])
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Invalid Header, Date is broken: %s", parsedHeader[1]))
 	}
@@ -415,7 +491,7 @@ func readSectionBody(reader *readBuffer) (body []string, err error) {
 			// End of section. A new section begins. Leaving the head in the buffer for further parsing.
 			break
 		}
-
+		reader.AcceptPeekedLine()
 		lines = append(lines, line)
 	}
 	return lines, err

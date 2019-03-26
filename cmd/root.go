@@ -15,8 +15,12 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/Fjolnir-Dvorak/modsecParser/modsecure"
 	"os"
+	"path"
+	"strconv"
 
 	"github.com/Fjolnir-Dvorak/environ"
 	"github.com/spf13/cobra"
@@ -35,10 +39,12 @@ var (
 	Environ      environ.Environ
 	sortUrls     bool
 	sortStatus   bool
-	sortProtocol bool
+	sortMethod   bool
+	fileList     []string
+	outDirectory string
+	fileMap = make(map[string]*os.File)
 )
 
-// rootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   ApplicationName,
 	Short: "A brief description of your application",
@@ -48,13 +54,9 @@ examples and usage of using your application. For example:
 Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	//	Run: func(cmd *cobra.Command, args []string) { },
+	Run: doRootAction,
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	if err := RootCmd.Execute(); err != nil {
 		fmt.Println(err)
@@ -66,19 +68,18 @@ func init() {
 	Environ = environ.New(VendorName, ApplicationName)
 	cobra.OnInitialize(initConfig)
 
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
 	configFile := filepath.Join(Environ.VarConfigLocal(), ApplicationName+"."+DefaultConfType)
 	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "",
 		"config file (default is "+configFile+")")
 
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	//RootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
-	RootCmd.Flags().BoolVarP(&sortUrls, "sortByUrls", "u", false, "sorts")
-	RootCmd.Flags().BoolVarP(&sortStatus, "sortByStatusCodes", "s", false, "sorts")
-	RootCmd.Flags().BoolVarP(&sortProtocol, "sortByProtocol", "p", false, "sorts")
+
+	RootCmd.Flags().BoolVarP(&sortUrls, "sortByUrls", "u", false, "sorts by urls")
+	RootCmd.Flags().BoolVarP(&sortStatus, "sortByStatusCodes", "s", false, "sorts by HTTP status code")
+	RootCmd.Flags().BoolVarP(&sortMethod, "sortByMethod", "m", false, "sorts")
+	RootCmd.Flags().StringArrayVarP(&fileList, "files", "f", nil, "files to parse")
+	RootCmd.MarkFlagRequired("files")
+	RootCmd.Flags().StringVarP(&outDirectory, "out", "o", "out/", "output directory")
+	RootCmd.MarkFlagRequired("out")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -98,5 +99,75 @@ func initConfig() {
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Println("Using config file:", viper.ConfigFileUsed())
+	}
+}
+
+func doRootAction(cmd *cobra.Command, args []string) {
+	defer closeFileMap()
+	for _, elem := range fileList {
+		reader, err := modsecure.CreateRecordReader(elem, false)
+		if err != nil {
+			panic(err)
+		}
+		filename := path.Base(elem)
+		for record := range reader.Iter() {
+			saveRecord(record, filename)
+		}
+	}
+}
+
+func saveRecord(record *modsecure.Record, filename string) {
+	statusCode := record.ResponseHeader.Status
+	requestPath := record.RequestHeader.Path
+	requestMethod := record.RequestHeader.Method
+
+	savePath := composePath(outDirectory, int(statusCode), requestMethod, requestPath, sortStatus, sortMethod, sortUrls)
+	payload, err := json.Marshal(record)
+	if err != nil {
+		panic(err)
+	}
+	appendToFile(savePath, filename, payload)
+}
+
+func composePath(basePath string, statusCode int, requestMethod string, requestPath string, useStatusCode, useRequestMethod, useRequestPath bool) (returnPath string){
+	returnPath = basePath
+	if useStatusCode {
+		returnPath = path.Join(returnPath, strconv.Itoa(statusCode))
+	}
+	if useRequestMethod {
+		returnPath = path.Join(returnPath, requestMethod)
+	}
+	if useRequestPath {
+		returnPath = path.Join(returnPath, requestPath)
+	}
+	return returnPath
+}
+
+func appendToFile(filepath, filename string, payload []byte) {
+	f := getFileHandler(filepath, filename)
+	_, err := f.Write(payload)
+	f.WriteString("\n")
+	if err != nil {
+		panic(err)
+	}
+}
+func getFileHandler(filepath, filename string) (f *os.File) {
+	fullName := path.Join(filepath, filename)
+	f, ok := fileMap[fullName]
+	if ok {
+		return f
+	}
+	os.MkdirAll(filepath, os.ModePerm)
+	f, err := os.OpenFile(fullName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		panic(err)
+	}
+	fileMap[fullName] = f
+	return f
+}
+
+func closeFileMap() {
+	for _, f := range fileMap {
+		f.Close()
 	}
 }
