@@ -32,16 +32,21 @@ type RecordReader struct {
 	Err error
 }
 
+type RecordAndRaw struct {
+	Record *Record
+	Raw string
+}
+
 var (
 	errEndReached = errors.New("End reached")
 	errNotMyRecord = errors.New("Not my Segment")
 	// parses: "--26bc3c6f-A--"
 	sectionStartRegex = regexp.MustCompile(`^--([a-z0-9]{8})-([ABCDEFGHIJKZ])--$`)
 	// parses: "[08/Oct/2018:00:00:01 +0200] W7qB4cCoFIQAAHtbutUAAAFI 92.38.32.36 36354 192.168.20.132 443"
-	logHeaderRegex = regexp.MustCompile(`^\[([0-9]{2}/(?:Jan|Feb|Mar|Apr|Mai|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/[0-9]{4}(?::[0-9]{2}){3}\s\+[0-9]{4})\]\s([a-zA-Z0-9\-@]{24})\s([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s([0-9]+)\s([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s([0-9]+)$`)
+	logHeaderRegex = regexp.MustCompile(`^\[([0-9]{2}/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/[0-9]{4}(?::[0-9]{2}){3}\s\+[0-9]{4})\]\s([a-zA-Z0-9\-@]{24,27})\s([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s([0-9]+)\s([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s([0-9]+)$`)
 	// parses: "POST /callback/auth/context/notify/v1.0 HTTP/2.0"
 	headerReqHeadRegex = regexp.MustCompile(`^([A-Z]+)\s([^\s]+)\s([A-Z]+/[0-9.]+)$`)
-	headerResHeadRegex = regexp.MustCompile(`^([A-Z]+/[0-9.]+)\s([0-9]{3,})\s*$`)
+	headerResHeadRegex = regexp.MustCompile(`^([A-Z]+/[0-9.]+)\s([0-9]{3,})\s*[A-Za-z\s]*$`)
 	layoutDate = "02/Jan/2006:15:04:05 -0700"
 )
 
@@ -57,25 +62,56 @@ func CreateRecordReader(filename string, debugSkipper bool) (reader *RecordReade
 	}, nil
 }
 
-func (r *RecordReader) Next() (record *Record, err error) {
-	return ReadSingleRecord(r.buffer)
+func (r *RecordReader) Next(historyBuffer *strings.Builder) (record *Record, err error) {
+	return ReadSingleRecord(r.buffer, historyBuffer)
 }
 
 func (r *RecordReader) HasNext() (bool) {
 	return !r.buffer.IsFinished
 }
 
+func (r *RecordReader) PeekToNextValidStart(historyBuffer *strings.Builder) (err error) {
+	return JumpToNextValidStart(r.buffer, historyBuffer)
+}
+
 func (r *RecordReader) Iter() <- chan *Record {
 	ch := make(chan *Record)
 	go func() {
 		defer close(ch)
+		var historyBuffer *strings.Builder
+		historyBuffer = &strings.Builder{}
 		for r.HasNext() {
-			item, err := r.Next()
+			item, err := r.Next(historyBuffer)
+			historyBuffer.Reset()
 			if err != nil {
 				r.Err = err
 				return
 			}
 			ch <- item
+		}
+	}()
+	return ch
+}
+
+func (r *RecordReader) IterLossy() <- chan *RecordAndRaw {
+	ch := make(chan *RecordAndRaw)
+	go func() {
+		defer close(ch)
+		var historyBuffer *strings.Builder
+		historyBuffer = &strings.Builder{}
+		for r.HasNext() {
+			recAndRaw := &RecordAndRaw{}
+			item, err := r.Next(historyBuffer)
+			if err != nil {
+				r.PeekToNextValidStart(historyBuffer)
+				recAndRaw.Raw = historyBuffer.String()
+				historyBuffer.Reset()
+				ch <- recAndRaw
+			}
+			recAndRaw.Record = item
+			recAndRaw.Raw = historyBuffer.String()
+			historyBuffer.Reset()
+			ch <- recAndRaw
 		}
 	}()
 	return ch
@@ -148,13 +184,51 @@ func (r *readBuffer) AcceptPeekedLine() {
 		r.hasLastReadLine = false
 	}
 }
+func (r *readBuffer) GetPeekedLineNumber() int {
+	if r.hasLastReadLine {
+		return r.linePointer + 1
+	} else {
+		return r.linePointer
+	}
+}
 
-func ReadSingleRecord(reader *readBuffer) (record *Record, err error){
+func JumpToNextValidStart(reader *readBuffer, historyBuffer *strings.Builder) (err error) {
+	reader.readRecordMutex.Lock()
+	defer reader.readRecordMutex.Unlock()
+	for {
+		firstLine, err := reader.PeekLine()
+		if err != nil {
+			if err == io.EOF {
+				//fmt.Println("Finished")
+				reader.IsFinished = true
+				return errEndReached
+			}
+			//fmt.Println("ERROR: unexpected behaviour while reading file line by line")
+			return err
+		}
+		success, _, sectionType := parseSectionDefinition(firstLine)
+		if !success {
+			historyBuffer.WriteString(firstLine)
+			historyBuffer.WriteRune('\n')
+			reader.AcceptPeekedLine()
+			continue
+		}
+		if sectionType != AuditHeader {
+			historyBuffer.WriteString(firstLine)
+			historyBuffer.WriteRune('\n')
+			reader.AcceptPeekedLine()
+			continue
+		}
+		return nil
+	}
+}
+
+func ReadSingleRecord(reader *readBuffer, historyBuffer *strings.Builder) (record *Record, err error) {
 	record = &Record{}
 	reader.readRecordMutex.Lock()
 	defer reader.readRecordMutex.Unlock()
 	for {
-		err = record.ReadSection(reader)
+		err = record.ReadSection(reader, historyBuffer)
 		if err != nil {
 			if record.Id == "" {
 				if reader.IsFinished {
@@ -173,10 +247,11 @@ func ReadSingleRecord(reader *readBuffer) (record *Record, err error){
 	}
 }
 
-func (r *Record) ReadSection(reader *readBuffer) (err error) {
+func (r *Record) ReadSection(reader *readBuffer, historyBuffer *strings.Builder) (err error) {
 	reader.readSectionMutex.Lock()
 	reader.readSectionMutex.Unlock()
 	firstLine, err := reader.PeekLine()
+	firstLineInt := reader.GetPeekedLineNumber()
 	if err != nil {
 		if err == io.EOF {
 			//fmt.Println("Finished")
@@ -201,9 +276,11 @@ func (r *Record) ReadSection(reader *readBuffer) (err error) {
 	} else if sectionType <= reader.LastSegmentKey {
 		return errNotMyRecord
 	}
+	historyBuffer.WriteString(firstLine)
+	historyBuffer.WriteRune('\n')
 	reader.AcceptPeekedLine()
 	reader.LastSegmentKey = sectionType
-	body, err := readSectionBody(reader)
+	body, err := readSectionBody(reader, historyBuffer)
 	switch sectionType {
 	case AuditHeader:
 		{
@@ -215,6 +292,7 @@ func (r *Record) ReadSection(reader *readBuffer) (err error) {
 				return errors.WithMessage(err, "Failed to parse AuditHeader")
 			}
 			r.AuditHeader = val
+			r.RecordLine = firstLineInt
 		}
 	case RequestHeader:
 		{
@@ -381,6 +459,9 @@ func parseResponseHeader(body []string) (section *SectionFResponseHeaders, err e
 	subbody := body[1:]
 	for _, elem := range subbody {
 		splitterated := strings.SplitN(elem, ": ", 2)
+		if len(splitterated) < 2 {
+			return nil, errors.New("Invalid Header")
+		}
 		header[splitterated[0]] = splitterated[1]
 	}
 	statusCode, err := strconv.Atoi(parsedLine[2])
@@ -422,6 +503,9 @@ func parseRequestHeader(body []string) (section *SectionBRequestHeader, err erro
 	subbody := body[1:]
 	for _, elem := range subbody {
 		splitterated := strings.SplitN(elem, ": ", 2)
+		if len(splitterated) < 2 {
+			return nil, errors.New("Invalid Header")
+		}
 		header[splitterated[0]] = splitterated[1]
 	}
 	section = &SectionBRequestHeader{
@@ -439,7 +523,7 @@ func parseAuditHeader(body []string) (section *SectionAAuditHeader, err error) {
 	}
 	parsedHeader := logHeaderRegex.FindStringSubmatch(body[0])
 	if parsedHeader == nil {
-		return nil, errors.New("Invalid Header")
+		return nil, errors.New(fmt.Sprintf("Invalid Header, Header string: \"%s\"", body[0]))
 	}
 	date, err := time.Parse(layoutDate, parsedHeader[1])
 	if err != nil {
@@ -472,7 +556,7 @@ func parseAuditHeader(body []string) (section *SectionAAuditHeader, err error) {
 	}, nil
 }
 
-func readSectionBody(reader *readBuffer) (body []string, err error) {
+func readSectionBody(reader *readBuffer, historyBuffer *strings.Builder) (body []string, err error) {
 	lines := make([]string, 0, 1)
 	for {
 		line, err := reader.PeekLine()
@@ -484,6 +568,7 @@ func readSectionBody(reader *readBuffer) (body []string, err error) {
 		}
 		if strings.TrimSpace(line) == "" {
 			// End of section. Removing empty line from read buffer.
+			historyBuffer.WriteRune('\n')
 			reader.AcceptPeekedLine()
 			break
 		}
@@ -491,6 +576,8 @@ func readSectionBody(reader *readBuffer) (body []string, err error) {
 			// End of section. A new section begins. Leaving the head in the buffer for further parsing.
 			break
 		}
+		historyBuffer.WriteString(line)
+		historyBuffer.WriteRune('\n')
 		reader.AcceptPeekedLine()
 		lines = append(lines, line)
 	}

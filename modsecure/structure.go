@@ -41,35 +41,36 @@ var (
 )
 
 type Record struct {
-	Id                          string
-	AuditHeader                 *SectionAAuditHeader
-	RequestHeader               *SectionBRequestHeader
-	RequestBody                 []string
-	IntendedResponseHeader      *SectionDIntendedResponseHeader
-	IntendedResponseBody        *SectionEIntendedResponseBody
-	ResponseHeader              *SectionFResponseHeaders
-	ResponseBody                []string
-	AuditLogTrailer             *SectionHAuditLogTrailer
-	ReducedMultipartRequestBody *SectionIReducedMultipartRequestBody
-	MultipartFilesInformation   *SectionJMultipartFileInformation
-	MatchedRulesInformation     *SectionKMatchedRuleInformation
-	AuditLogFooter              *SectionZAuditLogFooter
+	Id                          string                                `json:"id"`
+	AuditHeader                 *SectionAAuditHeader                  `json:"auditHeader"`
+	RequestHeader               *SectionBRequestHeader                `json:"requestHeader"`
+	RequestBody                 []string                              `json:"requestBody"`
+	IntendedResponseHeader      *SectionDIntendedResponseHeader       `json:"intendedResponseHeader"`
+	IntendedResponseBody        *SectionEIntendedResponseBody         `json:"intendedResponseBody"`
+	ResponseHeader              *SectionFResponseHeaders              `json:"responseHeader"`
+	ResponseBody                []string                              `json:"ResponseBody"`
+	AuditLogTrailer             *SectionHAuditLogTrailer              `json:"auditLogTrailer"`
+	ReducedMultipartRequestBody *SectionIReducedMultipartRequestBody  `json:"reducedMultipartRequestBody"`
+	MultipartFilesInformation   *SectionJMultipartFileInformation     `json:"multipartFilesInformation"`
+	MatchedRulesInformation     *SectionKMatchedRuleInformation       `json:"matchedRulesInformation"`
+	AuditLogFooter              *SectionZAuditLogFooter               `json:"auditLogFooter"`
+	RecordLine                  int                                   `json:"recordLine"`
 }
 
 type SectionAAuditHeader struct {
-	timestamp       time.Time
-	transactionID   string
-	sourceIP        net.IP
-	sourcePort      uint16
-	destinationIP   net.IP
-	destinationPort uint16
+	timestamp       time.Time `json:"timestamp"`
+	transactionID   string    `json:"transactionId"`
+	sourceIP        net.IP    `json:"sourceIp"`
+	sourcePort      uint16    `json:"sourcePort"`
+	destinationIP   net.IP    `json:"destinationIp"`
+	destinationPort uint16    `json:"destinationPort"`
 }
 
 type SectionBRequestHeader struct {
-	Protocol string
-	Method   string
-	Path     string
-	Header   *map[string]string
+	Protocol string             `json:"protocol"`
+	Method   string             `json:"method"`
+	Path     string             `json:"path"`
+	Header   *map[string]string `json:"header"`
 }
 
 type SectionCRequestBody struct {
@@ -82,9 +83,9 @@ type SectionEIntendedResponseBody struct {
 }
 
 type SectionFResponseHeaders struct {
-	Protocol string
-	Status   uint16
-	Header   *map[string]string
+	Protocol string             `json:"protocol"`
+	Status   uint16             `json:"status"`
+	Header   *map[string]string `json:"header"`
 }
 
 type SectionGResponseBody struct {

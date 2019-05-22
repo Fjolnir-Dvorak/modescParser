@@ -959,33 +959,65 @@ func TestRecordReader_Iter(t *testing.T) {
 			debugSkipper: false,
 		},
 		{
-			name: "Iterating over real live records 1.",
-			filename: "testdata/multiSection/hhweb31_track4j_post_log.20181008",
+			name: "Iterating over real live records 31 18.",
+			filename: "testdata/multiSection/hhweb31_track4j_post_log.20190518",
 			entries: 192504,
 			skipping:0,
 			err: false,
 			debugSkipper:true,
 		},
 		{
-			name: "Iterating over real live records 2.",
-			filename: "testdata/multiSection/hhweb32_track4j_post_log.20181008",
+			name: "Iterating over real live records 31 19.",
+			filename: "testdata/multiSection/hhweb31_track4j_post_log.20190519",
 			entries: 195509,
 			skipping:0,
 			err: false,
 			debugSkipper:true,
 		},
 		{
-			name: "Iterating over real live records 3.",
-			filename: "testdata/multiSection/hhweb41_track4j_post_log.20181008",
-			entries: 193419,
+			name: "Iterating over real live records 32 18.",
+			filename: "testdata/multiSection/hhweb32_track4j_post_log.20190518",
+			entries: 192504,
 			skipping:0,
 			err: false,
 			debugSkipper:true,
 		},
 		{
-			name: "Iterating over real live records 4.",
-			filename: "testdata/multiSection/hhweb42_track4j_post_log.20181008",
-			entries: 194220,
+			name: "Iterating over real live records 32 19.",
+			filename: "testdata/multiSection/hhweb32_track4j_post_log.20190519",
+			entries: 195509,
+			skipping:0,
+			err: false,
+			debugSkipper:true,
+		},
+		{
+			name: "Iterating over real live records 41 18.",
+			filename: "testdata/multiSection/hhweb41_track4j_post_log.20190518",
+			entries: 192504,
+			skipping:0,
+			err: false,
+			debugSkipper:true,
+		},
+		{
+			name: "Iterating over real live records 41 19.",
+			filename: "testdata/multiSection/hhweb41_track4j_post_log.20190519",
+			entries: 195509,
+			skipping:0,
+			err: false,
+			debugSkipper:true,
+		},
+		{
+			name: "Iterating over real live records 42 18.",
+			filename: "testdata/multiSection/hhweb42_track4j_post_log.20190518",
+			entries: 192504,
+			skipping:0,
+			err: false,
+			debugSkipper:true,
+		},
+		{
+			name: "Iterating over real live records 42 19.",
+			filename: "testdata/multiSection/hhweb42_track4j_post_log.20190519",
+			entries: 195509,
 			skipping:0,
 			err: false,
 			debugSkipper:true,
@@ -1002,11 +1034,11 @@ func TestRecordReader_Iter(t *testing.T) {
 				r.Next()
 			}
 			i := 0
-			for range r.Iter() {
+			for range r.IterLossy() {
 				i++
 			}
 			if i != tt.entries {
-				t.Errorf("RecordReader.Iter(). Got %v, elements expected %v", i, tt.entries)
+				t.Errorf("RecordReader.IterLossy(). Got %v, elements expected %v", i, tt.entries)
 				t.Errorf("Runner; %#v", r)
 				t.Errorf("Runner.err; %#v", r.Err)
 			}
