@@ -40,6 +40,7 @@ var (
 	}
 )
 
+//+k8s:openapi-gen=true
 type Record struct {
 	Id                          string                                `json:"id"`
 	AuditHeader                 *SectionAAuditHeader                  `json:"auditHeader"`
@@ -57,15 +58,17 @@ type Record struct {
 	RecordLine                  int                                   `json:"recordLine"`
 }
 
+//+k8s:openapi-gen=true
 type SectionAAuditHeader struct {
-	timestamp       time.Time `json:"timestamp"`
-	transactionID   string    `json:"transactionId"`
-	sourceIP        net.IP    `json:"sourceIp"`
-	sourcePort      uint16    `json:"sourcePort"`
-	destinationIP   net.IP    `json:"destinationIp"`
-	destinationPort uint16    `json:"destinationPort"`
+	Timestamp       time.Time `json:"timestamp"`
+	TransactionID   string    `json:"transactionId"`
+	SourceIP        net.IP    `json:"sourceIp"`
+	SourcePort      uint16    `json:"sourcePort"`
+	DestinationIP   net.IP    `json:"destinationIp"`
+	DestinationPort uint16    `json:"destinationPort"`
 }
 
+//+k8s:openapi-gen=true
 type SectionBRequestHeader struct {
 	Protocol string             `json:"protocol"`
 	Method   string             `json:"method"`
@@ -73,35 +76,45 @@ type SectionBRequestHeader struct {
 	Header   *map[string]string `json:"header"`
 }
 
+//+k8s:openapi-gen=true
 type SectionCRequestBody struct {
 }
 
+//+k8s:openapi-gen=true
 type SectionDIntendedResponseHeader struct {
 }
 
+//+k8s:openapi-gen=true
 type SectionEIntendedResponseBody struct {
 }
 
+//+k8s:openapi-gen=true
 type SectionFResponseHeaders struct {
 	Protocol string             `json:"protocol"`
 	Status   uint16             `json:"status"`
 	Header   *map[string]string `json:"header"`
 }
 
+//+k8s:openapi-gen=true
 type SectionGResponseBody struct {
 }
 
+//+k8s:openapi-gen=true
 type SectionHAuditLogTrailer struct {
 }
 
+//+k8s:openapi-gen=true
 type SectionIReducedMultipartRequestBody struct {
 }
 
+//+k8s:openapi-gen=true
 type SectionJMultipartFileInformation struct {
 }
 
+//+k8s:openapi-gen=true
 type SectionKMatchedRuleInformation struct {
 }
 
+//+k8s:openapi-gen=true
 type SectionZAuditLogFooter struct {
 }

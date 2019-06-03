@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Fjolnir-Dvorak/environ"
+	environ "github.com/Fjolnir-Dvorak/environ/pkg"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"path/filepath"
@@ -57,7 +57,7 @@ func init() {
 	Environ = environ.New(VendorName, ApplicationName)
 	cobra.OnInitialize(initConfig)
 
-	configFile := filepath.Join(Environ.VarConfigLocal(), ApplicationName+"."+DefaultConfType)
+	configFile := filepath.Join(Environ.UserConfig(), ApplicationName+"."+DefaultConfType)
 	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "",
 		"config file (default is "+configFile+")")
 }
@@ -70,7 +70,7 @@ func initConfig() {
 	} else {
 
 		// Search config in Environ.ConfigLocal() directory with name "ApplicationName" (without extension).
-		viper.AddConfigPath(Environ.ConfigLocal())
+		viper.AddConfigPath(Environ.UserConfig())
 		viper.SetConfigName(ApplicationName)
 	}
 

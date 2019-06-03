@@ -539,7 +539,7 @@ func parseAuditHeader(body []string) (section *SectionAAuditHeader, err error) {
 		return nil, errors.New(fmt.Sprintf("Invalid Header, SourcePort is broken: %s", parsedHeader[4]))
 	}
 	destIp := net.ParseIP(parsedHeader[5])
-	if sourceIp == nil {
+	if destIp == nil {
 		return nil, errors.New(fmt.Sprintf("Invalid Header, DestIp is broken: %s", parsedHeader[5]))
 	}
 	destPort, err := strconv.Atoi(parsedHeader[6])
@@ -547,12 +547,12 @@ func parseAuditHeader(body []string) (section *SectionAAuditHeader, err error) {
 		return nil, errors.New(fmt.Sprintf("Invalid Header, DestPort is broken: %s", parsedHeader[6]))
 	}
 	return &SectionAAuditHeader{
-		timestamp:       date,
-		transactionID:   id,
-		sourceIP:        sourceIp,
-		sourcePort:      uint16(sourcePort),
-		destinationIP:   destIp,
-		destinationPort: uint16(destPort),
+		Timestamp:       date,
+		TransactionID:   id,
+		SourceIP:        sourceIp,
+		SourcePort:      uint16(sourcePort),
+		DestinationIP:   destIp,
+		DestinationPort: uint16(destPort),
 	}, nil
 }
 

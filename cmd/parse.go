@@ -56,7 +56,7 @@ func init() {
 	parseCmd.Flags().BoolVarP(&sortUrls, "sortByUrls", "u", false, "sorts by urls")
 	parseCmd.Flags().BoolVarP(&sortStatus, "sortByStatusCodes", "s", false, "sorts by HTTP status code")
 	parseCmd.Flags().BoolVarP(&sortMethod, "sortByMethod", "m", false, "sorts")
-	parseCmd.Flags().StringArrayVarP(&fileList, "files", "f", nil, "files to parse")
+	parseCmd.Flags().StringSliceVarP(&fileList, "files", "f", nil, "files to parse")
 	parseCmd.MarkFlagRequired("files")
 	parseCmd.Flags().StringVarP(&outDirectory, "out", "o", "out/", "output directory")
 	parseCmd.MarkFlagRequired("out")
